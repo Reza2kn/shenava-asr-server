@@ -30,7 +30,6 @@ rustfft = "6"
 ndarray = "0.16"
 shenava-ctc-beam = { git = "https://github.com/Reza2kn/shenava-ctc-beam" }
 tract = { git = "https://github.com/Reza2kn/tract", branch = "shenava", default-features = false }
-hf-hub = "0.4"
 clap = { version = "4", features = ["derive", "string"] }
 log = "0.4"
 env_logger = "0.11"
