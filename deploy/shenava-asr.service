@@ -1,0 +1,17 @@
+[Unit]
+Description=Shenava ASR server (fully-Rust, tract + CUDA)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/shenava-asr-server
+Environment=RUST_LOG=info
+# CUDA 13.0 NVRTC (sm_120/Blackwell) + runtime libs first, then cudnn/cublas/etc.
+Environment=LD_LIBRARY_PATH=/home/rezo/tract-cuda13-libs:/home/rezo/.local/lib/python3.14/site-packages/nvidia/cu13/lib:/opt/bina-flax-site/nvidia/cudnn/lib:/opt/bina-flax-site/nvidia/cublas/lib:/opt/bina-flax-site/nvidia/cufft/lib:/opt/bina-flax-site/nvidia/cusparse/lib:/opt/bina-flax-site/nvidia/cusolver/lib:/opt/bina-flax-site/nvidia/nccl/lib:/opt/bina-flax-site/nvidia/cuda_runtime/lib:/opt/bina-flax-site/nvidia/nvjitlink/lib:/opt/bina-flax-site/nvidia/cuda_nvrtc/lib
+ExecStart=/root/shenava-asr-server/target/release/shenava-asr-server --model /root/shenava-asr-server/models/model.onnx --tokens /root/shenava-asr-server/models/tokens.txt --mel /root/shenava-asr-server/assets/mel_filters.json --hotwords /root/shenava-asr-server/hotwords.txt --backend gpu-or-cpu
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
