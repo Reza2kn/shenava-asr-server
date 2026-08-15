@@ -40,7 +40,7 @@ pub fn load_labels(tokens_path: &str) -> Result<(Vec<String>, usize)> {
 /// Greedy argmax decode (no hotwords) — useful as a fast baseline.
 pub fn greedy(log_probs: &Array2<f32>, labels: &[String], blank_id: usize) -> String {
     let mut out = String::new();
-    let mut prev: i64 = -1;
+    let mut prev: Option<usize> = None;
     for t in 0..log_probs.shape()[0] {
         let mut best = 0usize;
         let mut best_v = f32::NEG_INFINITY;
@@ -51,21 +51,28 @@ pub fn greedy(log_probs: &Array2<f32>, labels: &[String], blank_id: usize) -> St
                 best = v;
             }
         }
-        if best == blank_id || best as i64 == prev {
+        if best == blank_id {
+            prev = None;
+            continue;
+        }
+        if prev == Some(best) {
             continue;
         }
         let s = &labels[best];
         if s.is_empty() {
             continue;
         }
-        let s = s.trim_start_matches(BPE).trim_end_matches(BPE).to_string();
-        if !out.is_empty() {
+        let starts_word = s.starts_with(BPE);
+        let s = s.trim_matches(BPE);
+        if starts_word && !out.is_empty() {
             out.push(' ');
         }
-        out.push_str(&s);
-        prev = best as i64;
+        out.push_str(s);
+        prev = Some(best);
     }
-    out
+    out.chars()
+        .filter(|c| !('\u{E000}'..='\u{E0FF}').contains(c))
+        .collect()
 }
 
 /// Run hotword-boosted beam decode over `log_probs` (T x V).
@@ -79,7 +86,11 @@ pub fn decode_hotword(
     let dec = CtcBeamDecoder::new(labels.to_vec());
     let hw = Hotwords::new(hotwords.to_vec(), hotword_weight);
     let rows: Vec<Vec<f32>> = (0..log_probs.shape()[0])
-        .map(|t| (0..log_probs.shape()[1]).map(|v| log_probs[[t, v]]).collect())
+        .map(|t| {
+            (0..log_probs.shape()[1])
+                .map(|v| log_probs[[t, v]])
+                .collect()
+        })
         .collect();
     let text = dec.decode(&rows, &hw, beam_width, -5.0, -10.0);
     text.chars()
@@ -90,10 +101,41 @@ pub fn decode_hotword(
 /// Load a hotword list (one word/phrase per line; blank lines ignored).
 pub fn load_hotwords(path: &str) -> Result<Vec<String>> {
     let txt = std::fs::read_to_string(path)?;
-    Ok(txt
-        .lines()
+    Ok(parse_hotwords(&txt))
+}
+
+/// Parse the same newline-oriented hotword format accepted by the CLI file and
+/// the optional multipart `hotwords` field.
+pub fn parse_hotwords(text: &str) -> Vec<String> {
+    text.lines()
         .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .map(|l| l.to_string())
-        .collect())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+
+    #[test]
+    fn greedy_joins_bpe_pieces_and_resets_after_blank() {
+        let labels = vec!["▁شن".into(), "ا".into(), "".into()];
+        let probs = array![
+            [0.0, -4.0, -4.0],
+            [-4.0, 0.0, -4.0],
+            [-4.0, -4.0, 0.0],
+            [-4.0, 0.0, -4.0],
+        ];
+        assert_eq!(greedy(&probs, &labels, 2), "شناا");
+    }
+
+    #[test]
+    fn hotword_parser_ignores_comments_and_blank_lines() {
+        assert_eq!(
+            parse_hotwords("# names\nشنوا\n\n  رضا  \n"),
+            vec!["شنوا", "رضا"]
+        );
+    }
 }

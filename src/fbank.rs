@@ -9,6 +9,7 @@ use anyhow::Result;
 use ndarray::{Array1, Array2, Array3};
 use rustfft::num_complex::Complex32;
 use rustfft::FftPlanner;
+use std::io::Cursor;
 
 const N_FFT: usize = 512;
 const WIN_LEN: usize = 400;
@@ -16,7 +17,7 @@ const HOP: usize = 160;
 const N_MELS: usize = 80;
 const PAD: usize = 256;
 const PREEMPH: f32 = 0.97;
-const GUARD: f32 = 5.960464477539063e-08;
+const GUARD: f32 = 5.960_464_5e-8;
 const FIXED_FRAMES: usize = 2005;
 const SAMPLE_RATE: u32 = 16000;
 
@@ -33,7 +34,9 @@ impl Fbank {
             let txt = std::fs::read_to_string(p)?;
             let v: serde_json::Value = serde_json::from_str(&txt)?;
             let arr = v.get("filters").unwrap_or(&v);
-            let rows = arr.as_array().ok_or_else(|| anyhow::anyhow!("mel filters not an array"))?;
+            let rows = arr
+                .as_array()
+                .ok_or_else(|| anyhow::anyhow!("mel filters not an array"))?;
             let nrows = rows.len();
             let ncols = rows[0].as_array().unwrap().len();
             let mut flat = Vec::with_capacity(nrows * ncols);
@@ -56,7 +59,8 @@ impl Fbank {
         let mut window = vec![0.0f32; N_FFT];
         let off = (N_FFT - WIN_LEN) / 2;
         for i in 0..WIN_LEN {
-            let v = 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / (WIN_LEN as f32 - 1.0)).cos();
+            let v =
+                0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / (WIN_LEN as f32 - 1.0)).cos();
             window[off + i] = v;
         }
 
@@ -68,7 +72,8 @@ impl Fbank {
 
     /// Compute log-mel features for mono PCM at the configured sample rate.
     /// Returns `(features [80, nf], nf)`.
-    pub fn process(&mut self, sig: &[f32], sr: u32) -> Result<(Array2<f32>, usize)> {
+    pub fn process(&self, sig: &[f32], sr: u32) -> Result<(Array2<f32>, usize)> {
+        anyhow::ensure!(!sig.is_empty(), "WAV contains no audio samples");
         let sig = resample(sig, sr, SAMPLE_RATE)?;
         let n = sig.len();
         let nf = 1 + n / HOP;
@@ -92,7 +97,11 @@ impl Fbank {
         for i in 0..nf {
             let s = i * HOP;
             for j in 0..N_FFT {
-                let v = if s + j < padded.len() { padded[s + j] } else { 0.0 };
+                let v = if s + j < padded.len() {
+                    padded[s + j]
+                } else {
+                    0.0
+                };
                 reals[j] = v * self.window[j];
             }
             for j in 0..N_FFT {
@@ -147,13 +156,13 @@ fn resample(sig: &[f32], from: u32, to: u32) -> Result<Vec<f32>> {
     let ratio = to as f64 / from as f64;
     let out_len = ((sig.len() as f64) * ratio).ceil() as usize;
     let mut out = vec![0.0f32; out_len];
-    for i in 0..out_len {
+    for (i, sample) in out.iter_mut().enumerate() {
         let pos = i as f64 / ratio;
         let idx = pos.floor() as usize;
         let frac = (pos - idx as f64) as f32;
         let a = sig[idx.min(sig.len() - 1)];
         let b = sig[(idx + 1).min(sig.len() - 1)];
-        out[i] = a + (b - a) * frac;
+        *sample = a + (b - a) * frac;
     }
     Ok(out)
 }
@@ -167,14 +176,20 @@ fn reflect_pad(sig: &[f32], pad: usize) -> Vec<f32> {
     if n == 0 {
         return out;
     }
-    for i in 0..pad {
-        out[i] = sig[pad - i];
+    if n == 1 {
+        out.fill(sig[0]);
+        return out;
     }
-    for i in 0..n {
-        out[pad + i] = sig[i];
-    }
-    for i in 0..pad {
-        out[pad + n + i] = sig[n - 2 - i];
+    let period = 2 * (n - 1) as isize;
+    for (i, value) in out.iter_mut().enumerate() {
+        let source = i as isize - pad as isize;
+        let folded = source.rem_euclid(period);
+        let index = if folded < n as isize {
+            folded
+        } else {
+            period - folded
+        } as usize;
+        *value = sig[index];
     }
     out
 }
@@ -192,28 +207,36 @@ fn _hann_win() -> Array1<f32> {
 }
 
 /// Decode a mono WAV file (any bit depth) to f32 PCM + sample rate.
-pub fn read_wav(path: &str) -> Result<(Vec<f32>, u32)> {
-    let rdr = hound::WavReader::open(path)?;
+pub fn read_wav_bytes(bytes: &[u8]) -> Result<(Vec<f32>, u32)> {
+    let rdr = hound::WavReader::new(Cursor::new(bytes))?;
     let spec = rdr.spec();
     let sr = spec.sample_rate;
     let bits = spec.bits_per_sample;
     let ch = spec.channels as usize;
-    let samples = match bits {
-        16 => {
+    anyhow::ensure!(ch > 0, "WAV channel count is zero");
+    let samples = match (spec.sample_format, bits) {
+        (hound::SampleFormat::Int, 8..=16) => {
             let mut v = Vec::new();
             for s in rdr.into_samples::<i16>() {
-                v.push(s? as f32 / 32768.0);
+                v.push(s? as f32 / (1_u32 << (bits - 1)) as f32);
             }
             v
         }
-        32 => {
+        (hound::SampleFormat::Int, 17..=32) => {
             let mut v = Vec::new();
             for s in rdr.into_samples::<i32>() {
-                v.push(s? as f32 / 2147483648.0);
+                v.push(s? as f32 / (1_u64 << (bits - 1)) as f32);
             }
             v
         }
-        _ => anyhow::bail!("unsupported bits per sample: {bits}"),
+        (hound::SampleFormat::Float, 32) => {
+            let mut v = Vec::new();
+            for s in rdr.into_samples::<f32>() {
+                v.push(s?);
+            }
+            v
+        }
+        (format, _) => anyhow::bail!("unsupported WAV sample format: {format:?} {bits}-bit"),
     };
     // mix to mono
     let mono = if ch > 1 {
@@ -231,4 +254,18 @@ pub fn read_wav(path: &str) -> Result<(Vec<f32>, u32)> {
         samples
     };
     Ok((mono, sr))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reflect_padding_handles_short_audio() {
+        assert_eq!(
+            reflect_pad(&[1.0, 2.0, 3.0], 2),
+            vec![3.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0]
+        );
+        assert_eq!(reflect_pad(&[4.0], 3), vec![4.0; 7]);
+    }
 }

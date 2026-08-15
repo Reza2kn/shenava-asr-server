@@ -1,69 +1,93 @@
 # shenava-asr-server
 
-Fully-Rust Shenava ASR HTTP server. Loads the Shenava **Koochik** (114M FastConformer CTC) model
-through [tract](https://github.com/sonos/tract) (pure-Rust ONNX inference), computes the NeMo
-log-mel fbank in Rust, and decodes with hotword-boosted CTC beam search via
-[`shenava-ctc-beam`](https://github.com/Reza2kn/shenava-ctc-beam). Served over HTTP with axum.
+Portable Shenava Koochik ASR behind one HTTP contract. Audio preprocessing and CTC decoding stay in
+Rust; the acoustic-model runtime can be pure-Rust tract or native Apple CoreML.
 
-No Python, no onnxruntime, no C++ — one `./run.sh`.
+No Python, onnxruntime, or C++ is used by the running server.
 
 ## Quick start
 
 ```bash
-./run.sh                 # downloads model + tokens, builds, starts on :3000
-./run.sh --addr 0.0.0.0:8080 --hotwords hotwords.txt
+# Linux CPU, NVIDIA CUDA auto-detection, or an existing Unix deployment
+./run.sh
+
+# Windows CPU-only (PowerShell; downloads pinned, SHA-verified assets)
+.\run-windows.ps1
+
+# macOS 13+ native CoreML (CPU/GPU/Apple Neural Engine)
+./run-apple.sh
 ```
 
-On first run it downloads the pre-simplified model (~418 MB) from
-`Reza2kn/Shenava-Koochik-v1.0-tract-offline`. The model was run through `onnxsim` to constant-fold
-the NeMo dynamic-shape ops so tract can analyse it. Requires only Rust (cargo).
-
-## Backends
-
-`--backend gpu-or-cpu` (default) uses tract's `gpu-or-cpu` runtime: Metal on Apple silicon, CUDA on
-NVIDIA (build with `--features cuda`), else CPU. `--backend cpu` forces CPU.
-
-```bash
-# CUDA (NVIDIA hosts; runtime-detected, no nvcc needed):
-cargo build --release --features cuda
-./target/release/shenava-asr-server --backend gpu-or-cpu ...
-
-# CPU anywhere:
-cargo build --release
-./target/release/shenava-asr-server --backend cpu ...
-```
-
-`./run.sh` auto-detects `nvidia-smi` and enables the CUDA feature + `gpu-or-cpu` backend.
+The first launch downloads the selected model from Hugging Face. See
+[the backend matrix](docs/BACKENDS.md) for build commands and deployment boundaries.
 
 ## API
 
+```text
+POST /transcribe
+  multipart `file` = WAV
+  optional multipart `hotwords` = newline-delimited words/phrases
+
+  {
+    "text": "hotbeam result, or greedy when no hotwords are present",
+    "greedy": "plain CTC baseline",
+    "elapsed_ms": 42,
+    "backend": "cpu",
+    "decoder": "hotbeam"
+  }
+
+GET /health
+  {"ok":true,"backend":"cpu"}
 ```
-POST /transcribe   multipart form field `file` = 16 kHz mono WAV (any sample rate OK)
-                   -> {"text": "...", "greedy": "...", "elapsed_ms": 42}
-GET  /health       -> {"ok": true}
+
+WAV input may be mono or multichannel integer PCM (8–32 bit) or float32, at any non-zero sample
+rate. The server resamples and mixes to 16 kHz mono. The published offline models have a fixed
+2,005-frame window, so requests longer than about 20 seconds are rejected instead of silently
+truncated.
+
+```bash
+curl -F file=@speech.wav \
+  -F $'hotwords=شنوا\nرضا سیار' \
+  http://127.0.0.1:3000/transcribe
 ```
 
-- `text` — hotword-boosted beam decode (if `--hotwords` given), else greedy.
-- `greedy` — plain CTC greedy decode.
+Startup hotwords are also supported:
 
-## How it works
+```bash
+./run.sh --hotwords hotwords.txt --hotword-weight 2.5 --beam 80
+```
 
-1. **fbank** (`src/fbank.rs`): NeMo `AudioToMelSpectrogramPreprocessor` reproduction —
-   16 kHz, n_fft 512, hop 160, hann(periodic=false), center pad 256 reflect, preemphasis 0.97,
-   Slaney 80×257 mel, power spectrum, natural log, `normalize=NA`. Matches the deployed
-   reference (`koochik_server.py` + `preprocessor.json`) to the sample.
-2. **tract** (`src/model.rs`): loads the pre-simplified ONNX (fixed `[1,80,2005]` input),
-   runs on the chosen backend → `log_probs [1,T',1025]` + `output_length`. Numerically identical
-   to onnxruntime (max abs diff ~3e-5, 100% argmax agreement).
-3. **decode** (`src/decode.rs`): `shenava-ctc-beam` hotword-boosted CTC prefix beam search
-   (beam 80, weight 2.5); BPE `▁` word-boundary handling; `<...>` special tokens remapped to PUA
-   and stripped.
+Read [Improving word accuracy](docs/DECODING.md) or the
+[Persian guide to improving word accuracy](docs/DECODING.fa.md) before tuning a hotword weight or
+connecting a language model. `shenava-ctc-beam` is deliberately a no-LM hotbeam decoder; the
+guides mark the custom-LM integration boundary explicitly.
 
-## Model
+## Go services
 
-`Reza2kn/Shenava-Koochik-v1.0-tract-offline` — the sherpa-onnx Koochik export, pre-simplified
-with `onnxsim` at fixed `[1,80,2005]`. Requires the `shenava` branch of `Reza2kn/tract`
-(relaxes tract's i64/TDim/shape inference for NeMo FastConformer exports).
+The dependency-free [Go client](clients/go) runs Shenava as a Rust sidecar and preserves the same
+backend and model behavior:
+
+```go
+client := shenava.New("http://127.0.0.1:3000")
+result, err := client.Transcribe(ctx, "speech.wav", wav, shenava.TranscribeOptions{
+    Hotwords: []string{"شنوا", "رضا سیار"},
+})
+```
+
+This avoids reimplementing the 114M FastConformer and fbank in Go while still fitting a normal Go
+service deployment. See [clients/go/README.md](clients/go/README.md).
+
+## Shared inference contract
+
+1. `src/fbank.rs`: NeMo-compatible 16 kHz, 80-bin log-mel features; fixed `[1,80,2005]` tensor.
+2. `src/model.rs`: tract ONNX or CoreML ML Program; returns `[T,1025]` CTC scores and valid length.
+3. `src/decode.rs`: correct SentencePiece/CTC greedy baseline and optional hotword CTC beam search.
+
+The tract model is
+[`Reza2kn/Shenava-Koochik-v1.0-tract-offline`](https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-tract-offline).
+The Apple model is
+[`Reza2kn/Shenava-Koochik-v1.0-CoreML-fp16`](https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-CoreML-fp16).
+Both use ve_tok_v4 with blank id 1024 and the same fixed feature window.
 
 ## License
 
