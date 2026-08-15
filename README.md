@@ -1,5 +1,7 @@
 # shenava-asr-server
 
+[![Windows CPU-only](https://github.com/Reza2kn/shenava-asr-server/actions/workflows/windows-cpu.yml/badge.svg)](https://github.com/Reza2kn/shenava-asr-server/actions/workflows/windows-cpu.yml)
+
 Portable Shenava Koochik ASR behind one HTTP contract. Audio preprocessing and CTC decoding stay in
 Rust; the acoustic-model runtime can be pure-Rust tract or native Apple CoreML.
 

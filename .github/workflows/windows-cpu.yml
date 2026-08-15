@@ -1,0 +1,129 @@
+name: Windows CPU-only
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-cpu-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-msvc:
+    name: Native MSVC build and smoke test
+    runs-on: windows-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Cache pinned Shenava model
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: windows-koochik-b485a2da4b96087df52319c40a81f95329951a81
+
+      - name: Parse the PowerShell launcher
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path .\run-windows.ps1),
+            [ref]$tokens,
+            [ref]$parseErrors
+          ) | Out-Null
+          if ($parseErrors.Count -ne 0) {
+            $parseErrors | Format-List | Out-String | Write-Error
+            throw "run-windows.ps1 has PowerShell parse errors"
+          }
+
+      - name: Verify the CPU-only graph excludes CUDA
+        shell: pwsh
+        run: |
+          $tree = cargo tree --locked --no-default-features --features cpu-only
+          if ($LASTEXITCODE -ne 0) { throw "cargo tree failed" }
+          if ($tree | Select-String -SimpleMatch "cudarc") {
+            throw "The Windows CPU-only dependency graph unexpectedly contains cudarc"
+          }
+
+      - name: Run CPU-only tests with MSVC
+        run: cargo test --locked --no-default-features --features cpu-only
+
+      - name: Build the native release executable
+        run: cargo build --release --locked --no-default-features --features cpu-only
+
+      - name: Launch the native executable
+        shell: pwsh
+        run: |
+          & .\target\release\shenava-asr-server.exe --help
+          if ($LASTEXITCODE -ne 0) { throw "The native executable failed to launch" }
+
+      - name: Start through run-windows.ps1 and check health
+        shell: pwsh
+        run: |
+          $stdout = Join-Path $env:RUNNER_TEMP "shenava-windows.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "shenava-windows.stderr.log"
+          $launcher = Join-Path $PWD "run-windows.ps1"
+          $server = Start-Process pwsh -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr `
+            -ArgumentList @(
+              "-NoProfile",
+              "-ExecutionPolicy", "Bypass",
+              "-File", $launcher,
+              "-Addr", "127.0.0.1:3100"
+            )
+
+          try {
+            $health = $null
+            for ($attempt = 1; $attempt -le 180; $attempt++) {
+              if ($server.HasExited) {
+                throw "run-windows.ps1 exited before the server became healthy"
+              }
+              try {
+                $health = Invoke-RestMethod -Uri "http://127.0.0.1:3100/health" -TimeoutSec 2
+                break
+              } catch {
+                Start-Sleep -Seconds 5
+              }
+            }
+
+            if ($null -eq $health) { throw "Shenava did not become healthy within 15 minutes" }
+            if (-not $health.ok -or $health.backend -ne "cpu") {
+              throw "Unexpected health response: $($health | ConvertTo-Json -Compress)"
+            }
+            Write-Host "Verified Windows health: $($health | ConvertTo-Json -Compress)"
+          } finally {
+            if (-not $server.HasExited) {
+              taskkill /PID $server.Id /T /F | Out-Null
+            }
+            if (Test-Path $stdout) { Get-Content $stdout }
+            if (Test-Path $stderr) { Get-Content $stderr }
+          }
+
+      - name: Upload native executable and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shenava-windows-x86_64
+          if-no-files-found: warn
+          path: |
+            target/release/shenava-asr-server.exe
+            ${{ runner.temp }}/shenava-windows.stdout.log
+            ${{ runner.temp }}/shenava-windows.stderr.log
