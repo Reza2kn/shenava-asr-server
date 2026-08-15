@@ -3,12 +3,13 @@
 #
 #   ./run.sh [--addr 0.0.0.0:3000] [--hotwords hotwords.txt] [extra args...]
 #
-# Downloads the model + tokens from Hugging Face on first run, builds in release
-# mode, and starts the server. Requires only Rust (cargo) and network access.
+# Downloads pinned model + token assets from Hugging Face on first run, verifies
+# them, builds in release mode, and starts the server. Requires cargo + curl.
 
 set -euo pipefail
 
-REPO="Reza2kn/Shenava-Koochik-v1.0-tract-offline"
+REVISION="b485a2da4b96087df52319c40a81f95329951a81"
+BASE_URL="https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-tract-offline/resolve/$REVISION"
 MODEL_DIR="models"
 MODEL="$MODEL_DIR/model.onnx"
 TOKENS="$MODEL_DIR/tokens.txt"
@@ -16,41 +17,36 @@ TOKENS="$MODEL_DIR/tokens.txt"
 echo "[shenava-asr-server] ensuring model assets..."
 mkdir -p "$MODEL_DIR"
 
-if [ ! -f "$MODEL" ] || [ ! -s "$MODEL" ]; then
-  echo "[shenava-asr-server] downloading $REPO/model.onnx (~418 MB, first run only)..."
-  if command -v huggingface-cli >/dev/null 2>&1; then
-    huggingface-cli download "$REPO" model.onnx --local-dir "$MODEL_DIR" --local-dir-use-symlinks False
+verify_sha() {
+  local path="$1" expected="$2"
+  if command -v sha256sum >/dev/null 2>&1; then
+    [ "$(sha256sum "$path" | awk '{print $1}')" = "$expected" ]
   else
-    python3 - "$REPO" "$MODEL_DIR" <<'PY'
-import sys, os
-repo, d = sys.argv[1], sys.argv[2]
-try:
-    from huggingface_hub import snapshot_download
-except ImportError:
-    raise SystemExit("huggingface_hub not installed; run: pip install -U huggingface_hub")
-p = snapshot_download(repo_id=repo, local_dir=d, allow_patterns=["model.onnx", "tokens.txt"])
-print("downloaded to", p)
-PY
+    [ "$(shasum -a 256 "$path" | awk '{print $1}')" = "$expected" ]
   fi
-  echo "[shenava-asr-server] model downloaded."
-else
-  echo "[shenava-asr-server] model present."
-fi
+}
 
-if [ ! -f "$TOKENS" ] || [ ! -s "$TOKENS" ]; then
-  echo "[shenava-asr-server] downloading tokens.txt..."
-  if command -v huggingface-cli >/dev/null 2>&1; then
-    huggingface-cli download "$REPO" tokens.txt --local-dir "$MODEL_DIR" --local-dir-use-symlinks False
-  else
-    python3 - "$REPO" "$MODEL_DIR" <<'PY'
-import sys
-repo, d = sys.argv[1], sys.argv[2]
-from huggingface_hub import hf_hub_download
-hf_hub_download(repo_id=repo, filename="tokens.txt", local_dir=d)
-print("tokens.txt downloaded")
-PY
+download_verified() {
+  local name="$1"
+  local expected="$2"
+  local dest="$MODEL_DIR/$name"
+  if [ -f "$dest" ] && verify_sha "$dest" "$expected"; then
+    echo "[shenava-asr-server] verified $dest"
+    return
   fi
-fi
+  local partial="$dest.partial"
+  echo "[shenava-asr-server] downloading pinned $name..."
+  curl -fL --retry 3 "$BASE_URL/$name" -o "$partial"
+  if ! verify_sha "$partial" "$expected"; then
+    rm -f "$partial"
+    echo "[shenava-asr-server] SHA-256 verification failed: $name" >&2
+    exit 1
+  fi
+  mv -f "$partial" "$dest"
+}
+
+download_verified "model.onnx" "0bfdf9fc3c531f351ad02d7d6b4b309da7ff2f73eb20e2ae167fa12d074c75ac"
+download_verified "tokens.txt" "8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954"
 
 echo "[shenava-asr-server] building (release)..."
 FEATURES=""
