@@ -23,6 +23,10 @@ The script pins the Hugging Face revision and verifies the ONNX and token files 
 SHA-256 before building with the dedicated `cpu-only` feature. The produced server uses tract's
 CPU runtime. It does not load onnxruntime, Python, CUDA, or a C++ inference library.
 
+Every pull request and push to `main` runs `.github/workflows/windows-cpu.yml` on GitHub's native
+Windows/MSVC runner. It tests the CPU-only feature, builds and launches the release `.exe`, starts
+the server through `run-windows.ps1`, and requires a healthy CPU-backend response.
+
 Manual build:
 
 ```powershell
