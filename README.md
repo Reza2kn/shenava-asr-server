@@ -23,6 +23,67 @@ No Python, onnxruntime, or C++ is used by the running server.
 The first launch downloads the selected model from Hugging Face. See
 [the backend matrix](docs/BACKENDS.md) for build commands and deployment boundaries.
 
+## Windows CPU-only: optimized build and launch
+
+Use 64-bit Windows with the stable Rust MSVC toolchain, an MSVC linker, and the Windows SDK. The
+recommended launcher downloads the pinned ONNX model and tokens, verifies their size and SHA-256,
+builds the optimized release executable, and starts the server:
+
+```powershell
+git clone https://github.com/Reza2kn/shenava-asr-server.git
+Set-Location shenava-asr-server
+.\run-windows.ps1 -Addr "127.0.0.1:3000"
+```
+
+The resulting native binary is `target\release\shenava-asr-server.exe`. The running server does
+not require Python, onnxruntime, CUDA, or a C++ model runtime.
+
+To build the optimized executable manually after `models\model.onnx` and `models\tokens.txt` are
+available:
+
+```powershell
+cargo build --release --locked --no-default-features --features cpu-only
+```
+
+Launch that executable directly:
+
+```powershell
+.\target\release\shenava-asr-server.exe `
+  --backend cpu `
+  --model .\models\model.onnx `
+  --tokens .\models\tokens.txt `
+  --mel .\assets\mel_filters.json `
+  --addr 127.0.0.1:3000
+```
+
+Check that the model is loaded and the CPU backend is ready:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:3000/health
+# ok backend
+# -- -------
+# True cpu
+```
+
+To use startup hotwords, save one UTF-8 word or phrase per line and pass the file to the launcher:
+
+```powershell
+.\run-windows.ps1 -Addr "127.0.0.1:3000" -Hotwords ".\hotwords.txt"
+```
+
+Windows performance and deployment tips:
+
+- Always use the `--release` binary. The release profile enables optimization level 3 and LTO;
+  debug builds are much slower.
+- Keep the server running between requests so model loading and tract graph analysis happen once.
+- Bind to `127.0.0.1` for a local application. Use `0.0.0.0` only when other machines must connect,
+  and configure Windows Firewall for the selected port.
+- Keep each upload at about 20 seconds or less because the published model uses a fixed 2,005-frame
+  input window.
+- Every green [Windows CPU-only workflow run](https://github.com/Reza2kn/shenava-asr-server/actions/workflows/windows-cpu.yml)
+  uploads a `shenava-windows-x86_64` artifact containing the optimized `.exe` and validation logs.
+  The model remains a separate pinned download handled by `run-windows.ps1`.
+
 ## API
 
 ```text
