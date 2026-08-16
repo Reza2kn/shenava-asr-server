@@ -26,7 +26,11 @@ use ndarray::Array3;
 use serde::Serialize;
 
 #[derive(Parser, Debug)]
-#[command(name = "shenava-asr-server", about = "Fully-Rust Shenava ASR server")]
+#[command(
+    name = "shenava-asr-server",
+    about = "Fully-Rust Shenava ASR server",
+    version
+)]
 struct Args {
     /// Path to the Koochik model: tract ONNX or CoreML .mlpackage/.mlmodelc.
     #[arg(long, default_value = "models/model.onnx")]
@@ -78,12 +82,16 @@ struct TranscribeResp {
     elapsed_ms: u64,
     backend: &'static str,
     decoder: &'static str,
+    version: &'static str,
+    decoder_revision: &'static str,
 }
 
 #[derive(Serialize)]
 struct HealthResp {
     ok: bool,
     backend: &'static str,
+    version: &'static str,
+    decoder_revision: &'static str,
 }
 
 #[tokio::main]
@@ -93,6 +101,7 @@ async fn main() -> Result<()> {
 
     let (labels, blank_id) = decode::load_labels(&args.tokens)?;
     log::info!("loaded {} labels (blank={blank_id})", labels.len());
+    log::info!("decoder revision: {}", decode::DECODER_REVISION);
 
     let hotwords = if let Some(p) = &args.hotwords {
         let hw = decode::load_hotwords(p)?;
@@ -140,6 +149,8 @@ async fn health(State(app): State<Arc<App>>) -> Json<HealthResp> {
     Json(HealthResp {
         ok: true,
         backend: app.model.name(),
+        version: env!("CARGO_PKG_VERSION"),
+        decoder_revision: decode::DECODER_REVISION,
     })
 }
 
@@ -202,6 +213,8 @@ async fn transcribe(
                 elapsed_ms,
                 backend: app.model.name(),
                 decoder: if used_hotbeam { "hotbeam" } else { "greedy" },
+                version: env!("CARGO_PKG_VERSION"),
+                decoder_revision: decode::DECODER_REVISION,
             }),
         )),
         Err(e) => Err((StatusCode::BAD_REQUEST, format!("{e:#}"))),

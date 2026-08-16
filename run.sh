@@ -54,7 +54,7 @@ if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
   echo "[shenava-asr-server] NVIDIA GPU detected — enabling CUDA backend."
   FEATURES="--features cuda"
 fi
-cargo build --release $FEATURES
+cargo build --release --locked $FEATURES
 
 BACKEND="cpu"
 if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then

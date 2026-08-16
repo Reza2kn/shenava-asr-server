@@ -60,9 +60,9 @@ Check that the model is loaded and the CPU backend is ready:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:3000/health
-# ok backend
-# -- -------
-# True cpu
+# ok backend version decoder_revision
+# -- ------- ------- ----------------
+# True cpu     0.1.1 sentencepiece-v2
 ```
 
 To use startup hotwords, save one UTF-8 word or phrase per line and pass the file to the launcher:
@@ -96,11 +96,13 @@ POST /transcribe
     "greedy": "plain CTC baseline",
     "elapsed_ms": 42,
     "backend": "cpu",
-    "decoder": "hotbeam"
+    "decoder": "hotbeam",
+    "version": "0.1.1",
+    "decoder_revision": "sentencepiece-v2"
   }
 
 GET /health
-  {"ok":true,"backend":"cpu"}
+  {"ok":true,"backend":"cpu","version":"0.1.1","decoder_revision":"sentencepiece-v2"}
 ```
 
 WAV input may be mono or multichannel integer PCM (8–32 bit) or float32, at any non-zero sample
@@ -124,6 +126,28 @@ Read [Improving word accuracy](docs/DECODING.md) or the
 [Persian guide to improving word accuracy](docs/DECODING.fa.md) before tuning a hotword weight or
 connecting a language model. `shenava-ctc-beam` is deliberately a no-LM hotbeam decoder; the
 guides mark the custom-LM integration boundary explicitly.
+
+### If Persian words are split into BPE pieces
+
+Output such as `فرو ش نده سی ب` comes from Shenava server 0.1.0's old greedy renderer, which added
+a space after every CTC token instead of only at SentencePiece `▁` word boundaries. It is not a
+CPU accuracy difference. CPU, CUDA, and CoreML now use the same corrected decoder.
+
+If `/transcribe` returns only `text`, `greedy`, and `elapsed_ms`, that process is stale. A current
+response and `/health` both include `"version":"0.1.1"` and
+`"decoder_revision":"sentencepiece-v2"`.
+
+Update and rebuild the Ubuntu service, then restart the process that owns the listening port:
+
+```bash
+git pull --ff-only origin main
+cargo build --release --locked
+./target/release/shenava-asr-server --version
+# shenava-asr-server 0.1.1
+```
+
+The one-command `./run.sh` path performs the same locked release rebuild. Do not keep an older
+`target/release/shenava-asr-server` process running after pulling the fix.
 
 ## Go services
 

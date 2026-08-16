@@ -9,6 +9,7 @@ use ndarray::Array2;
 use shenava_ctc_beam::{CtcBeamDecoder, Hotwords};
 
 pub const BPE: char = '\u{2581}'; // ▁
+pub const DECODER_REVISION: &str = "sentencepiece-v2";
 
 /// Load token labels from a `tokens.txt` (one `token id` per line, id ascending from 0).
 /// Returns `(labels, blank_id)`.
@@ -129,6 +130,36 @@ mod tests {
             [-4.0, 0.0, -4.0],
         ];
         assert_eq!(greedy(&probs, &labels, 2), "شناا");
+    }
+
+    #[test]
+    fn greedy_and_hotbeam_do_not_space_every_persian_bpe_piece() {
+        // Regression for the old renderer, which turned these tokens into
+        // "فرو ش نده سی ب" by inserting a space after every CTC token.
+        let labels = vec![
+            "▁فرو".into(),
+            "ش".into(),
+            "نده".into(),
+            "▁سی".into(),
+            "ب".into(),
+            "▁رو".into(),
+            "ست".into(),
+            "ای".into(),
+            "▁کوچ".into(),
+            "ک".into(),
+            "".into(),
+        ];
+        let path = [
+            0, 10, 1, 10, 2, 10, 3, 10, 4, 10, 5, 10, 6, 10, 7, 10, 8, 10, 9,
+        ];
+        let mut probs = Array2::from_elem((path.len(), labels.len()), -20.0);
+        for (frame, token) in path.into_iter().enumerate() {
+            probs[[frame, token]] = 0.0;
+        }
+
+        let expected = "فروشنده سیب روستای کوچک";
+        assert_eq!(greedy(&probs, &labels, 10), expected);
+        assert_eq!(decode_hotword(&probs, &labels, &[], 2.5, 20), expected);
     }
 
     #[test]
