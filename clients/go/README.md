@@ -23,8 +23,12 @@ func main() {
     result, err := client.Transcribe(context.Background(), "speech.wav", wav,
         shenava.TranscribeOptions{Hotwords: []string{"شنوا", "رضا سیار"}})
     if err != nil { panic(err) }
-    fmt.Println(result.Text, result.Backend, result.Decoder)
+    fmt.Println(result.Text, result.Backend, result.Decoder, result.DecoderRevision)
 }
 ```
+
+`Version` and `DecoderRevision` are also returned by `Health`. Require
+`DecoderRevision == "sentencepiece-v2"` when a deployment must reject the old renderer that spaced
+every Persian BPE piece.
 
 Run `go test ./...` from this directory.

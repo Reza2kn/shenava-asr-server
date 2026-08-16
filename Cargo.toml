@@ -1,6 +1,6 @@
 [package]
 name = "shenava-asr-server"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Reza Sayar <rsayar@uvic.ca>"]
 description = "Fully-Rust Shenava ASR HTTP server: tract (Koochik offline) + Rust fbank + shenava-ctc-beam hotword decode."

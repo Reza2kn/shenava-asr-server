@@ -27,16 +27,20 @@ type TranscribeOptions struct {
 }
 
 type Transcription struct {
-	Text      string `json:"text"`
-	Greedy    string `json:"greedy"`
-	ElapsedMS uint64 `json:"elapsed_ms"`
-	Backend   string `json:"backend"`
-	Decoder   string `json:"decoder"`
+	Text            string `json:"text"`
+	Greedy          string `json:"greedy"`
+	ElapsedMS       uint64 `json:"elapsed_ms"`
+	Backend         string `json:"backend"`
+	Decoder         string `json:"decoder"`
+	Version         string `json:"version"`
+	DecoderRevision string `json:"decoder_revision"`
 }
 
 type Health struct {
-	OK      bool   `json:"ok"`
-	Backend string `json:"backend"`
+	OK              bool   `json:"ok"`
+	Backend         string `json:"backend"`
+	Version         string `json:"version"`
+	DecoderRevision string `json:"decoder_revision"`
 }
 
 func New(baseURL string) *Client {

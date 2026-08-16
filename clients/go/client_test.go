@@ -27,7 +27,7 @@ func TestTranscribeSendsAudioAndHotwords(t *testing.T) {
 			t.Fatalf("unexpected hotwords: %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"text":"شنوا","greedy":"شنوا","elapsed_ms":9,"backend":"cpu","decoder":"hotbeam"}`)
+		_, _ = io.WriteString(w, `{"text":"شنوا","greedy":"شنوا","elapsed_ms":9,"backend":"cpu","decoder":"hotbeam","version":"0.1.1","decoder_revision":"sentencepiece-v2"}`)
 	}))
 	defer server.Close()
 
@@ -41,7 +41,8 @@ func TestTranscribeSendsAudioAndHotwords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Decoder != "hotbeam" || got.Backend != "cpu" {
+	if got.Decoder != "hotbeam" || got.Backend != "cpu" ||
+		got.Version != "0.1.1" || got.DecoderRevision != "sentencepiece-v2" {
 		t.Fatalf("unexpected response: %#v", got)
 	}
 }
