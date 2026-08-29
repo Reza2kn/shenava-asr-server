@@ -221,6 +221,8 @@ async fn transcribe(
     }
 }
 
+const CHUNK_SECONDS: usize = 10;
+
 fn transcribe_bytes(
     app: Arc<App>,
     bytes: &[u8],
@@ -229,31 +231,49 @@ fn transcribe_bytes(
     let (sig, sr) = fbank::read_wav_bytes(bytes)?;
     log::debug!("wav {sr} Hz, {} samples", sig.len());
 
-    let (feat, nf) = app.fbank.process(&sig, sr)?;
-    anyhow::ensure!(
-        nf <= model::INPUT_FRAMES,
-        "audio is too long for the fixed 2005-frame model window (about 20 seconds)"
-    );
-    let fixed: Array3<f32> = app.fbank.to_fixed(&feat, nf);
-    log::debug!("fbank {} frames -> fixed 2005", nf);
-
-    let (log_probs, valid) = app.model.run(&fixed, nf)?;
-    log::debug!("{} log_probs [{valid}, 1025]", app.model.name());
-
-    let greedy = decode::greedy(&log_probs, &app.labels, app.blank_id);
     let mut hotwords = app.hotwords.clone();
     hotwords.extend_from_slice(request_hotwords);
     let used_hotbeam = !hotwords.is_empty();
-    let text = if !used_hotbeam {
-        greedy.clone()
-    } else {
-        decode::decode_hotword(
-            &log_probs,
-            &app.labels,
-            &hotwords,
-            app.hotword_weight,
-            app.beam,
-        )
-    };
-    Ok((text, greedy, used_hotbeam))
+
+    let chunk_len = sr as usize * CHUNK_SECONDS;
+    let chunks: Vec<&[f32]> = sig.chunks(chunk_len).collect();
+    log::debug!(
+        "split {} samples into {} chunk(s) of up to {}s",
+        sig.len(),
+        chunks.len(),
+        CHUNK_SECONDS
+    );
+
+    let mut texts = Vec::with_capacity(chunks.len());
+    let mut greedies = Vec::with_capacity(chunks.len());
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        let (feat, nf) = app.fbank.process(chunk, sr)?;
+        anyhow::ensure!(
+            nf <= model::INPUT_FRAMES,
+            "chunk {i} is too long for the fixed 2005-frame model window (about 20 seconds)"
+        );
+        let fixed: Array3<f32> = app.fbank.to_fixed(&feat, nf);
+        log::debug!("chunk {i}: fbank {} frames -> fixed 2005", nf);
+
+        let (log_probs, valid) = app.model.run(&fixed, nf)?;
+        log::debug!("chunk {i}: {} log_probs [{valid}, 1025]", app.model.name());
+
+        let greedy = decode::greedy(&log_probs, &app.labels, app.blank_id);
+        let text = if !used_hotbeam {
+            greedy.clone()
+        } else {
+            decode::decode_hotword(
+                &log_probs,
+                &app.labels,
+                &hotwords,
+                app.hotword_weight,
+                app.beam,
+            )
+        };
+        greedies.push(greedy);
+        texts.push(text);
+    }
+
+    Ok((texts.join(" "), greedies.join(" "), used_hotbeam))
 }
