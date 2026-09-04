@@ -737,6 +737,7 @@ fn parse_mode(value: &str) -> Option<bool> {
         _ => None,
     }
 }
+const CHUNK_SECONDS: usize = 10;
 
 fn transcribe_bytes(
     app: Arc<App>,
@@ -750,6 +751,37 @@ fn transcribe_bytes(
 }
 
 fn transcribe_signal(
+    app: &App,
+    sig: &[f32],
+    sr: u32,
+    request_hotwords: &[String],
+) -> Result<(String, String, bool)> {
+    let chunk_len = sr as usize * CHUNK_SECONDS;
+    let chunks: Vec<&[f32]> = sig.chunks(chunk_len).collect();
+    log::debug!(
+        "split {} samples into {} chunk(s) of up to {}s",
+        sig.len(),
+        chunks.len(),
+        CHUNK_SECONDS
+    );
+
+    let mut texts = Vec::with_capacity(chunks.len());
+    let mut greedies = Vec::with_capacity(chunks.len());
+    let mut used_hotbeam = false;
+    for (i, chunk) in chunks.iter().enumerate() {
+        let (text, greedy, chunk_used_hotbeam) =
+            transcribe_single_signal(app, chunk, sr, request_hotwords).with_context(|| {
+                format!("transcribe offline chunk {i} (up to {CHUNK_SECONDS}s)")
+            })?;
+        texts.push(text);
+        greedies.push(greedy);
+        used_hotbeam |= chunk_used_hotbeam;
+    }
+
+    Ok((texts.join(" "), greedies.join(" "), used_hotbeam))
+}
+
+fn transcribe_single_signal(
     app: &App,
     sig: &[f32],
     sr: u32,
