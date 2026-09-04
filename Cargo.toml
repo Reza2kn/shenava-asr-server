@@ -26,6 +26,12 @@ cuda = ["tract-runtime", "tract/cuda-13000"]
 # Native Apple CoreML inference. This stays opt-in so Linux and Windows builds
 # do not pull Apple framework bindings.
 coreml = ["dep:coreml-native"]
+# Native Rust Nemotron diarization through the repository's Tract fork. This
+# is deliberately separate from the ASR default so CPU-only Windows builds do
+# not pull the full runtime registry unless diarization is requested.
+native-diarization = ["tract-runtime"]
+# Native Rust cache-aware Persian Koochik CTC streaming through Tract.
+native-streaming = ["tract-runtime"]
 
 [dependencies]
 axum = { version = "0.8", features = ["multipart"] }

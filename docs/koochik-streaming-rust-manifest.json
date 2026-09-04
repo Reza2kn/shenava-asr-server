@@ -1,0 +1,20 @@
+{
+  "format": "fixed-shape-onnx-native-rust-tract",
+  "source_model": "Reza2kn/Shenava-Koochik-v1.0-tract-streaming",
+  "source_file": "model.onnx",
+  "graph": "model.onnx",
+  "tokens": "tokens.txt",
+  "feature_bins": 80,
+  "feature_chunk_frames": 121,
+  "feature_shift_frames": 112,
+  "chunk_seconds": 1.12,
+  "pre_encode_overlap_frames": 9,
+  "cache_last_channel_shape": [1, 17, 70, 512],
+  "cache_last_time_shape": [1, 17, 512, 8],
+  "ctc_vocab_size": 1025,
+  "blank_id": 1024,
+  "sha256": {
+    "model.onnx": "c5e7dc34f472e89bd3c48dd6d511482bce455088c5332349ac3afc36f84a3467",
+    "tokens.txt": "8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954"
+  }
+}

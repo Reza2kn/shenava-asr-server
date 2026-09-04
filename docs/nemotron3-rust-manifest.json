@@ -1,0 +1,25 @@
+{
+  "package": "Reza2kn/shenava-nemotron3-rust",
+  "source_model": "nvidia/Nemotron-3-Diarization-preview",
+  "format": "fixed-shape-onnx-native-rust-tract",
+  "graph": "nemotron3-streaming.onnx",
+  "sidecar": "nemotron3-streaming.onnx.silence.bin",
+  "sample_rate": 16000,
+  "mel_bins": 128,
+  "chunk_core_frames": 340,
+  "right_context_frames": 40,
+  "stack": 8,
+  "cache_frames": 264,
+  "fifo_frames": 40,
+  "embedding_dim": 512,
+  "speakers": 8,
+  "frame_ms": 10,
+  "runtime": {
+    "cpu": "Tract CPU",
+    "gpu": "Tract CUDA when built with cuda"
+  },
+  "sha256": {
+    "nemotron3-streaming.onnx": "9ae7b8ac29138a613e8a7df8c2aca6a29f24efb9f5dbe2b60ba4345593720962",
+    "nemotron3-streaming.onnx.silence.bin": "cfe7ea16eb73cdf2c67363c5e0d06a201bc10b3bc7d0e1bac1660b8390dbfbb8"
+  }
+}

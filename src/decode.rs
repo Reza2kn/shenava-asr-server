@@ -15,16 +15,49 @@ pub const DECODER_REVISION: &str = "sentencepiece-v2";
 /// Returns `(labels, blank_id)`.
 pub fn load_labels(tokens_path: &str) -> Result<(Vec<String>, usize)> {
     let txt = std::fs::read_to_string(tokens_path)?;
-    let mut toks: Vec<String> = Vec::new();
-    for line in txt.lines() {
-        let t = line.split_whitespace().next().unwrap_or_default();
-        toks.push(t.to_string());
-    }
+    let (toks, declared_blank) = if txt.trim_start().starts_with('{') {
+        let value: serde_json::Value = serde_json::from_str(&txt)
+            .map_err(|e| anyhow::anyhow!("parse JSON token file {tokens_path}: {e}"))?;
+        let tokens = value
+            .get("tokens")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| anyhow::anyhow!("JSON token file has no `tokens` array"))?;
+        let toks = tokens
+            .iter()
+            .map(|token| {
+                token
+                    .as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| anyhow::anyhow!("JSON token array contains a non-string value"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let blank = value
+            .get("blank_id")
+            .and_then(serde_json::Value::as_u64)
+            .map(|v| v as usize);
+        (toks, blank)
+    } else {
+        let toks = txt
+            .lines()
+            .map(|line| {
+                line.split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        (toks, None)
+    };
     if toks.is_empty() {
         anyhow::bail!("empty tokens.txt");
     }
-    // blank is the last token (`<blk>`), mapped to the empty label for the decoder.
-    let blank_id = toks.len() - 1;
+    // The legacy text contract puts blank last; JSON model manifests may
+    // declare it explicitly.
+    let blank_id = declared_blank.unwrap_or(toks.len() - 1);
+    anyhow::ensure!(
+        blank_id < toks.len(),
+        "blank id {blank_id} exceeds token count"
+    );
     let mut labels: Vec<String> = Vec::with_capacity(toks.len());
     for (i, t) in toks.iter().enumerate() {
         if i == blank_id {
@@ -168,5 +201,24 @@ mod tests {
             parse_hotwords("# names\nشنوا\n\n  رضا  \n"),
             vec!["شنوا", "رضا"]
         );
+    }
+
+    #[test]
+    fn json_token_manifest_honors_declared_blank_id() {
+        let path = std::env::temp_dir().join(format!(
+            "shenava-token-test-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, r#"{"blank_id":1,"tokens":["<pad>","<blk>","▁سلام"]}"#).unwrap();
+        let (labels, blank) = load_labels(path.to_str().unwrap()).unwrap();
+        let _ = std::fs::remove_file(path);
+        assert_eq!(blank, 1);
+        assert!(labels[0].chars().next().unwrap() as u32 >= 0xE000);
+        assert_eq!(labels[1], "");
+        assert_eq!(labels[2], "▁سلام");
     }
 }

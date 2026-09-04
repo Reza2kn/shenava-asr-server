@@ -23,6 +23,40 @@ No Python, onnxruntime, or C++ is used by the running server.
 The first launch downloads the selected model from Hugging Face. See
 [the backend matrix](docs/BACKENDS.md) for build commands and deployment boundaries.
 
+## Native Rust diarization and streaming
+
+The optional native pipelines are implemented in Rust with Tract and selected per request:
+
+- `native-diarization` runs the Nemotron-3 diarization graph and preserves speaking order,
+  including overlapping speaker spans, when `/transcribe` receives `diarization=true`.
+- `native-streaming` runs the cache-aware 114M Shenava Koochik CTC graph when
+  `/transcribe` receives `mode=streaming`.
+
+Build both features with CUDA support (the `gpu-or-cpu` backend falls back to CPU when CUDA is
+unavailable):
+
+```bash
+cargo build --release --locked --features cuda,native-diarization,native-streaming
+./target/release/shenava-asr-server \
+  --backend gpu-or-cpu \
+  --model models/model.onnx \
+  --tokens models/tokens.txt \
+  --mel assets/mel_filters.json \
+  --diarizer-nemotron-model models/nemotron3-streaming.onnx \
+  --diarizer-native-backend gpu-or-cpu \
+  --streaming-model models/koochik-streaming.onnx \
+  --streaming-tokens models/tokens.txt \
+  --streaming-backend gpu-or-cpu
+```
+
+The verified 114M Koochik streaming package is
+[Reza2kn/Shenava-Koochik-v1.0-tract-streaming](https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-tract-streaming).
+The exported Nemotron package for the native runtime is
+[Reza2kn/shenava-nemotron3-rust](https://huggingface.co/Reza2kn/shenava-nemotron3-rust)
+(private). The running server requires only Rust and the selected model files; the one-time
+NeMo export step is not part of the serving path. See [diarization details](docs/DIARIZATION.md),
+[streaming details](docs/STREAMING.md), and the [Koochik runtime notes](docs/KOOCHIK_STREAMING_RUST.md).
+
 ## Windows CPU-only: optimized build and launch
 
 Use 64-bit Windows with the stable Rust MSVC toolchain, an MSVC linker, and the Windows SDK. The
@@ -90,6 +124,8 @@ Windows performance and deployment tips:
 POST /transcribe
   multipart `file` = WAV
   optional multipart `hotwords` = newline-delimited words/phrases
+  optional multipart `diarization` = true/false (default false)
+  optional multipart `mode` = offline/streaming (default offline)
 
   {
     "text": "hotbeam result, or greedy when no hotwords are present",
@@ -98,12 +134,43 @@ POST /transcribe
     "backend": "cpu",
     "decoder": "hotbeam",
     "version": "0.1.1",
-    "decoder_revision": "sentencepiece-v2"
+    "decoder_revision": "sentencepiece-v2",
+    "mode": "offline",
+    "diarization": false,
+    "segments": null
+  }
+
+With `diarization=true` and the native Nemotron graph configured, `segments`
+contains timestamped speaker spans and `text` is the same spans rendered as
+ordered `speaker_N: text` lines. Overlapping spans stay overlapping and remain
+adjacent in audio order. This composition uses the offline Koochik model for
+each diarized span; `diarization=true` and `mode=streaming` are currently
+rejected together.
+
+With `mode=streaming`, configure `--streaming-model` and its matching
+`--streaming-tokens`. The cache-aware Rust/Tract model can process audio longer
+than the offline model's fixed 2,005-frame window.
+
+POST /diarize
+  multipart `file` = WAV, optional multipart `model` = `sortformer` or `nemotron3`
+  available with `--diarizer-worker`, or natively for Nemotron with
+  `--features native-diarization --diarizer-nemotron-model <graph.onnx>`
+
+  {
+    "model": "sortformer",
+    "backend": "cpu",
+    "frame_ms": 80,
+    "max_speakers": 4,
+    "segments": [{"start_ms":1040,"end_ms":2240,"speaker_id":1,"speaker":"speaker_1"}],
+    "elapsed_ms": 42
   }
 
 GET /health
   {"ok":true,"backend":"cpu","version":"0.1.1","decoder_revision":"sentencepiece-v2"}
 ```
+
+See [optional speaker diarization](docs/DIARIZATION.md) for the native-Rust
+Nemotron graph contract and the ordered overlap-preserving segment stream.
 
 WAV input may be mono or multichannel integer PCM (8–32 bit) or float32, at any non-zero sample
 rate. The server resamples and mixes to 16 kHz mono. The published offline models have a fixed
@@ -113,6 +180,14 @@ truncated.
 ```bash
 curl -F file=@speech.wav \
   -F $'hotwords=شنوا\nرضا سیار' \
+  http://127.0.0.1:3000/transcribe
+
+# Native Rust Nemotron diarization + ordered speaker-attributed ASR
+curl -F file=@speech.wav -F diarization=true \
+  http://127.0.0.1:3000/transcribe
+
+# Native Rust cache-aware Koochik streaming
+curl -F file=@speech.wav -F mode=streaming \
   http://127.0.0.1:3000/transcribe
 ```
 
@@ -166,9 +241,11 @@ service deployment. See [clients/go/README.md](clients/go/README.md).
 
 ## Shared inference contract
 
-1. `src/fbank.rs`: NeMo-compatible 16 kHz, 80-bin log-mel features; fixed `[1,80,2005]` tensor.
-2. `src/model.rs`: tract ONNX or CoreML ML Program; returns `[T,1025]` CTC scores and valid length.
-3. `src/decode.rs`: correct SentencePiece/CTC greedy baseline and optional hotword CTC beam search.
+1. `src/fbank.rs`: NeMo-compatible 16 kHz, 80-bin log-mel features; fixed offline `[1,80,2005]` or streaming chunks.
+2. `src/model.rs`: offline tract ONNX or CoreML ML Program; returns `[T,1025]` CTC scores and valid length.
+3. `src/streaming.rs`: cache-aware 114M Koochik CTC chunks for native Rust streaming.
+4. `src/nemotron.rs`: native Rust Nemotron speaker-cache inference and ordered overlap-preserving spans.
+5. `src/decode.rs`: correct SentencePiece/CTC greedy baseline and optional hotword CTC beam search.
 
 The tract model is
 [`Reza2kn/Shenava-Koochik-v1.0-tract-offline`](https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-tract-offline).
