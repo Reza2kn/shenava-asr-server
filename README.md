@@ -20,8 +20,8 @@ No Python, onnxruntime, or C++ is used by the running server.
 ./run-apple.sh
 ```
 
-The first launch downloads the offline and streaming model assets from Hugging Face. If
-`HF_TOKEN` is available, it also downloads the private Nemotron diarization package. See
+The first launch downloads the offline, streaming, and public Nemotron model assets from Hugging Face.
+`HF_TOKEN` is optional. See
 [the backend matrix](docs/BACKENDS.md) for build commands and deployment boundaries.
 
 ## Native Rust diarization and streaming
@@ -61,17 +61,14 @@ NeMo export step is not part of the serving path. See [diarization details](docs
 ### One-command launcher
 
 `run.sh` now builds both native Rust features and stores their verified assets under `models/`.
-For diarization, authenticate to Hugging Face with an account that can read the private derived
-Nemotron package:
+The public derived Nemotron package requires no Hugging Face authentication:
 
 ```bash
-export HF_TOKEN="hf_..."
 ./run.sh
 ```
 
-Without `HF_TOKEN`, the launcher still starts offline ASR and streaming and prints that Nemotron
-was skipped; `diarization=true` will remain unavailable until the package is downloaded. To
-explicitly skip optional assets, use `SHENAVA_ENABLE_DIARIZATION=0` or
+The launcher downloads Nemotron anonymously and stores it under `models/`. `HF_TOKEN` may still be
+set for a private mirror. To explicitly skip optional assets, use `SHENAVA_ENABLE_DIARIZATION=0` or
 `SHENAVA_ENABLE_STREAMING=0`. The launcher always compiles `native-diarization` and
 `native-streaming`, so a later request cannot fail merely because the binary was built CPU-only.
 

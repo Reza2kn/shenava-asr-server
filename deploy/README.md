@@ -30,7 +30,7 @@ package or conda `cuda-nvrtc-13.0.88`). NVRTC cubins are cached in
 ```bash
 git clone https://github.com/Reza2kn/shenava-asr-server
 cd shenava-asr-server
-HF_TOKEN="hf_..." ./run.sh   # downloads offline+streaming assets and Nemotron when authorized,
+./run.sh                      # downloads offline+streaming+public Nemotron assets,
                               # builds native Rust features (+ CUDA if nvidia-smi), serves :3000
 ```
 

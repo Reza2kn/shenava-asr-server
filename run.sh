@@ -4,9 +4,8 @@
 #   ./run.sh [server arguments...]
 #
 # Downloads pinned model assets from Hugging Face, verifies them, builds the
-# native Rust feature set, and starts the server. The private Nemotron package
-# is enabled automatically when HF_TOKEN (or HUGGINGFACE_HUB_TOKEN) is set, or
-# when a verified copy is already present in models/.
+# native Rust feature set, and starts the server. The public Nemotron package
+# is downloaded automatically; HF_TOKEN is accepted but not required.
 
 set -euo pipefail
 
@@ -32,8 +31,9 @@ STREAMING_MODEL_SHA="c5e7dc34f472e89bd3c48dd6d511482bce455088c5332349ac3afc36f84
 NEMOTRON_MODEL_SHA="9ae7b8ac29138a613e8a7df8c2aca6a29f24efb9f5dbe2b60ba4345593720962"
 NEMOTRON_SIDECAR_SHA="cfe7ea16eb73cdf2c67363c5e0d06a201bc10b3bc7d0e1bac1660b8390dbfbb8"
 
-# Do not print this value. It is passed to curl only when downloading the
-# private derived Nemotron package.
+# Do not print this value. It is passed to curl only for Hugging Face
+# downloads. The public packages do not require it, but it also works for
+# installations using a private mirror.
 HF_TOKEN="${HF_TOKEN:-${HUGGINGFACE_HUB_TOKEN:-}}"
 CURL_AUTH=()
 if [ -n "$HF_TOKEN" ]; then
@@ -93,31 +93,11 @@ ENABLE_DIARIZATION="${SHENAVA_ENABLE_DIARIZATION:-auto}"
 case "$ENABLE_DIARIZATION" in
   1|true|TRUE|yes|YES|on|ON) ENABLE_DIARIZATION=1 ;;
   0|false|FALSE|no|NO|off|OFF) ENABLE_DIARIZATION=0 ;;
-  auto)
-    if [ -n "$HF_TOKEN" ] || {
-      [ -f "$NEMOTRON_MODEL" ] && verify_sha "$NEMOTRON_MODEL" "$NEMOTRON_MODEL_SHA" \
-        && [ -f "$NEMOTRON_SIDECAR" ] && verify_sha "$NEMOTRON_SIDECAR" "$NEMOTRON_SIDECAR_SHA";
-    }; then
-      ENABLE_DIARIZATION=1
-    else
-      ENABLE_DIARIZATION=0
-      echo "[shenava-asr-server] HF_TOKEN not set; Nemotron diarization asset will be skipped."
-      echo "[shenava-asr-server] Set HF_TOKEN for diarization, or use SHENAVA_ENABLE_DIARIZATION=0 explicitly."
-    fi
-    ;;
+  auto) ENABLE_DIARIZATION=1 ;;
   *) echo "[shenava-asr-server] SHENAVA_ENABLE_DIARIZATION must be true, false, or auto" >&2; exit 2 ;;
 esac
 
 if [ "$ENABLE_DIARIZATION" = 1 ]; then
-  if [ -z "$HF_TOKEN" ] && {
-    [ ! -f "$NEMOTRON_MODEL" ] || ! verify_sha "$NEMOTRON_MODEL" "$NEMOTRON_MODEL_SHA" \
-      || [ ! -f "$NEMOTRON_SIDECAR" ] || ! verify_sha "$NEMOTRON_SIDECAR" "$NEMOTRON_SIDECAR_SHA";
-  }; then
-    echo "[shenava-asr-server] Nemotron is a private Hugging Face artifact." >&2
-    echo "[shenava-asr-server] Export an access token first: HF_TOKEN=hf_... ./run.sh" >&2
-    echo "[shenava-asr-server] To run offline ASR only: SHENAVA_ENABLE_DIARIZATION=0 ./run.sh" >&2
-    exit 1
-  fi
   download_verified "$NEMOTRON_BASE/nemotron3-streaming.onnx" "$NEMOTRON_MODEL" "$NEMOTRON_MODEL_SHA"
   download_verified "$NEMOTRON_BASE/nemotron3-streaming.onnx.silence.bin" "$NEMOTRON_SIDECAR" "$NEMOTRON_SIDECAR_SHA"
 fi
