@@ -166,6 +166,11 @@ With `mode=streaming`, configure `--streaming-model` and its matching
 `--streaming-tokens`. The cache-aware Rust/Tract model can process audio longer
 than the offline model's fixed 2,005-frame window.
 
+When `mode` is omitted, a configured streaming model is selected automatically
+for audio longer than the offline window. The response reports
+`"mode":"streaming"` in that case. Set `mode=offline` to explicitly keep the
+offline model's 10-second chunked path.
+
 POST /diarize
   multipart `file` = WAV, optional multipart `model` = `sortformer` or `nemotron3`
   available with `--diarizer-worker`, or natively for Nemotron with

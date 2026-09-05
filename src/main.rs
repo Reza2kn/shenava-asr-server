@@ -545,6 +545,7 @@ async fn transcribe(
     let mut request_hotwords = Vec::new();
     let mut requested_diarization = false;
     let mut requested_streaming = false;
+    let mut mode_was_explicit = false;
     while let Some(field) = multipart
         .next_field()
         .await
@@ -580,6 +581,7 @@ async fn transcribe(
                 })?;
             }
             Some("mode") => {
+                mode_was_explicit = true;
                 let value = field
                     .text()
                     .await
@@ -600,6 +602,23 @@ async fn transcribe(
             "missing multipart field `file`".into(),
         ));
     };
+    #[cfg(feature = "native-streaming")]
+    if let Some(_streaming) = app.streaming.as_ref() {
+        let (signal, sample_rate) = fbank::read_wav_bytes(&bytes)
+            .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e:#}")))?;
+        if should_auto_stream(
+            signal.len(),
+            sample_rate,
+            true,
+            mode_was_explicit,
+            requested_diarization,
+        ) {
+            log::info!(
+                "audio is longer than the offline model window; using native streaming fallback"
+            );
+            requested_streaming = true;
+        }
+    }
     if requested_diarization && requested_streaming {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -738,6 +757,20 @@ fn parse_mode(value: &str) -> Option<bool> {
     }
 }
 const CHUNK_SECONDS: usize = 10;
+
+fn should_auto_stream(
+    sample_count: usize,
+    sample_rate: u32,
+    streaming_available: bool,
+    mode_was_explicit: bool,
+    diarization_requested: bool,
+) -> bool {
+    streaming_available
+        && !mode_was_explicit
+        && !diarization_requested
+        && sample_rate > 0
+        && sample_count > sample_rate as usize * CHUNK_SECONDS * 2
+}
 
 fn transcribe_bytes(
     app: Arc<App>,
@@ -901,7 +934,9 @@ fn transcribe_diarized(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_bool_field, parse_mode, valid_worker_selector, DiarizeWorkerResp};
+    use super::{
+        parse_bool_field, parse_mode, should_auto_stream, valid_worker_selector, DiarizeWorkerResp,
+    };
 
     #[test]
     fn boolean_request_field_accepts_common_multipart_values() {
@@ -920,6 +955,15 @@ mod tests {
         assert_eq!(parse_mode("streaming"), Some(true));
         assert_eq!(parse_mode("stream"), Some(true));
         assert_eq!(parse_mode("batch"), None);
+    }
+
+    #[test]
+    fn long_audio_auto_selects_streaming_only_when_mode_is_omitted() {
+        assert!(should_auto_stream(16000 * 21, 16000, true, false, false));
+        assert!(!should_auto_stream(16000 * 21, 16000, true, true, false));
+        assert!(!should_auto_stream(16000 * 21, 16000, true, false, true));
+        assert!(!should_auto_stream(16000 * 21, 16000, false, false, false));
+        assert!(!should_auto_stream(16000 * 20, 16000, true, false, false));
     }
 
     #[test]
