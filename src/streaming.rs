@@ -33,6 +33,7 @@ struct CacheState {
 impl Model {
     pub fn load(model_path: &str, backend: crate::model::Backend) -> Result<Self> {
         let backend_name = match backend {
+            crate::model::Backend::Cuda => "cuda",
             crate::model::Backend::GpuOrCpu => "gpu-or-cpu",
             crate::model::Backend::Cpu => "cpu",
             crate::model::Backend::CoreMl => {
@@ -41,15 +42,22 @@ impl Model {
         };
         let graph = tract::onnx()?.load(model_path)?.into_model()?;
         let runtime = tract::runtime_for_name(backend_name)?;
+        let runtime_name = runtime.name().unwrap_or_else(|_| backend_name.to_owned());
+        let actual_backend = match runtime_name.as_str() {
+            "cuda" => "cuda",
+            "metal" => "metal",
+            "cpu" => "cpu",
+            _ => backend_name,
+        };
         log::info!(
             "streaming Tract backend: {} ({} available)",
             backend_name,
-            runtime.name().unwrap_or_default()
+            actual_backend
         );
         let runnable = runtime.prepare(graph)?;
         Ok(Self {
             runnable,
-            backend: backend_name,
+            backend: actual_backend,
         })
     }
 

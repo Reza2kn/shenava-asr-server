@@ -105,9 +105,56 @@ fi
 echo "[shenava-asr-server] building native Rust release..."
 FEATURES="native-diarization,native-streaming"
 if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
-  echo "[shenava-asr-server] NVIDIA GPU detected — enabling Tract CUDA backend."
+  echo "[shenava-asr-server] NVIDIA GPU detected — requiring the Tract CUDA backend."
   FEATURES="cuda,$FEATURES"
-  BACKEND="gpu-or-cpu"
+  BACKEND="cuda"
+
+  # NVIDIA's pip wheels intentionally install cuDNN outside the system loader
+  # path. Locate only the cuDNN directory: adding an entire Python environment
+  # can accidentally mix its cuBLAS/cuBLASLt with /usr/local/cuda.
+  CUDNN_VISIBLE=0
+  if command -v ldconfig >/dev/null 2>&1 && ldconfig -p 2>/dev/null | grep -q 'libcudnn\.so'; then
+    CUDNN_VISIBLE=1
+  elif command -v python3 >/dev/null 2>&1 && python3 -c 'import ctypes; ctypes.CDLL("libcudnn.so.9")' >/dev/null 2>&1; then
+    CUDNN_VISIBLE=1
+  fi
+  if [ "$CUDNN_VISIBLE" = 0 ]; then
+    CUDNN_LIB_DIR=""
+    if command -v python3 >/dev/null 2>&1; then
+      CUDNN_LIB_DIR="$(python3 - <<'PY'
+import glob
+import os
+import site
+import sysconfig
+
+candidates = []
+venv = os.environ.get("VIRTUAL_ENV")
+if venv:
+    candidates.extend(glob.glob(os.path.join(venv, "lib/python*/site-packages/nvidia/cudnn/lib")))
+for root in site.getsitepackages() + [site.getusersitepackages(), sysconfig.get_path("purelib")]:
+    if root:
+        candidates.append(os.path.join(root, "nvidia/cudnn/lib"))
+candidates.extend(glob.glob(os.path.expanduser("~/.local/lib/python*/site-packages/nvidia/cudnn/lib")))
+candidates.extend(glob.glob("/usr/local/lib/python*/dist-packages/nvidia/cudnn/lib"))
+candidates.extend(glob.glob("/usr/local/lib/python*/site-packages/nvidia/cudnn/lib"))
+candidates.extend(glob.glob("/opt/*/lib/python*/site-packages/nvidia/cudnn/lib"))
+for path in candidates:
+    if glob.glob(os.path.join(path, "libcudnn.so*")):
+        print(path)
+        break
+PY
+)"
+    fi
+    if [ -n "$CUDNN_LIB_DIR" ]; then
+      export LD_LIBRARY_PATH="$CUDNN_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+      echo "[shenava-asr-server] found cuDNN in $CUDNN_LIB_DIR"
+    else
+      echo "[shenava-asr-server] cuDNN is not visible to the dynamic loader." >&2
+      echo "[shenava-asr-server] Install NVIDIA cuDNN or add its lib directory to LD_LIBRARY_PATH." >&2
+      echo "[shenava-asr-server] For pip: python3 -m pip install nvidia-cudnn-cu13" >&2
+      exit 1
+    fi
+  fi
 else
   BACKEND="cpu"
 fi

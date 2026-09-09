@@ -33,21 +33,21 @@ The optional native pipelines are implemented in Rust with Tract and selected pe
 - `native-streaming` runs the cache-aware 114M Shenava Koochik CTC graph when
   `/transcribe` receives `mode=streaming`.
 
-Build both features with CUDA support (the `gpu-or-cpu` backend falls back to CPU when CUDA is
-unavailable):
+Build both features with strict CUDA support (startup fails with an actionable error when CUDA is
+unavailable instead of silently falling back to CPU):
 
 ```bash
 cargo build --release --locked --features cuda,native-diarization,native-streaming
 ./target/release/shenava-asr-server \
-  --backend gpu-or-cpu \
+  --backend cuda \
   --model models/model.onnx \
   --tokens models/tokens.txt \
   --mel assets/mel_filters.json \
   --diarizer-nemotron-model models/nemotron3-streaming.onnx \
-  --diarizer-native-backend gpu-or-cpu \
+  --diarizer-native-backend cuda \
   --streaming-model models/koochik-streaming.onnx \
   --streaming-tokens models/tokens.txt \
-  --streaming-backend gpu-or-cpu
+  --streaming-backend cuda
 ```
 
 The verified 114M Koochik streaming package is

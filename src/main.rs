@@ -76,7 +76,7 @@ struct Args {
     #[arg(long, default_value_t = 80)]
     beam: usize,
 
-    /// Compute backend: cpu, gpu-or-cpu (CUDA/Metal auto), or CoreML.
+    /// Compute backend: cuda (strict), gpu-or-cpu (allows fallback), cpu, or CoreML.
     #[arg(long, value_enum, default_value_t = model::Backend::Cpu)]
     backend: model::Backend,
 
@@ -108,12 +108,12 @@ struct Args {
     #[arg(long)]
     diarizer_nemotron_model: Option<String>,
 
-    /// Native Nemotron backend: CPU or Tract's CUDA/CPU auto runtime.
+    /// Native Nemotron backend: strict CUDA, CPU, or Tract's CUDA/CPU auto runtime.
     #[cfg(feature = "native-diarization")]
     #[arg(long, value_enum, default_value_t = model::Backend::GpuOrCpu)]
     diarizer_native_backend: model::Backend,
 
-    /// Native streaming backend: CPU or Tract's CUDA/CPU auto runtime.
+    /// Native streaming backend: strict CUDA, CPU, or Tract's CUDA/CPU auto runtime.
     #[cfg(feature = "native-streaming")]
     #[arg(long, value_enum, default_value_t = model::Backend::GpuOrCpu)]
     streaming_backend: model::Backend,

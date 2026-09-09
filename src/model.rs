@@ -18,6 +18,9 @@ const VOCAB_SIZE: usize = 1025;
 /// Runtime selected for acoustic-model inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Backend {
+    /// Strict NVIDIA CUDA runtime; fail startup instead of silently using CPU.
+    #[value(name = "cuda")]
+    Cuda,
     /// tract auto-selection: CUDA/Metal when available, otherwise CPU.
     #[value(name = "gpu-or-cpu", alias = "auto")]
     GpuOrCpu,
@@ -33,6 +36,7 @@ pub enum Backend {
 impl Backend {
     fn tract_runtime_name(self) -> Option<&'static str> {
         match self {
+            Backend::Cuda => Some("cuda"),
             Backend::GpuOrCpu => Some("gpu-or-cpu"),
             Backend::Cpu => Some("cpu"),
             Backend::CoreMl => None,
@@ -53,6 +57,7 @@ pub enum InferenceModel {
 impl InferenceModel {
     pub fn load(model_path: &str, backend: Backend) -> Result<Self> {
         match backend {
+            Backend::Cuda => Self::load_tract(model_path, backend),
             Backend::GpuOrCpu => Self::load_tract(model_path, backend),
             Backend::Cpu => Self::load_cpu(model_path),
             Backend::CoreMl => Self::load_coreml(model_path),
@@ -135,15 +140,18 @@ impl TractModel {
             .context("CoreML is not a tract runtime")?;
         let model = tract::onnx()?.load(model_path)?.into_model()?;
         let runtime = tract::runtime_for_name(name)?;
-        log::info!(
-            "tract backend: {} ({} available)",
-            name,
-            runtime.name().unwrap_or_default()
-        );
+        let runtime_name = runtime.name().unwrap_or_else(|_| name.to_owned());
+        let actual_backend = match runtime_name.as_str() {
+            "cuda" => "cuda",
+            "metal" => "metal",
+            "cpu" => "cpu",
+            _ => name,
+        };
+        log::info!("tract backend: {} ({} available)", name, actual_backend);
         let runnable = runtime.prepare(model)?;
         Ok(Self {
             runnable,
-            backend: name,
+            backend: actual_backend,
         })
     }
 

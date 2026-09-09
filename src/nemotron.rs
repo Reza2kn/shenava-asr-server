@@ -59,6 +59,7 @@ pub struct Model {
 impl Model {
     pub fn load(model_path: &str, backend: crate::model::Backend) -> Result<Self> {
         let backend_name = match backend {
+            crate::model::Backend::Cuda => "cuda",
             crate::model::Backend::GpuOrCpu => "gpu-or-cpu",
             crate::model::Backend::Cpu => "cpu",
             crate::model::Backend::CoreMl => {
@@ -67,9 +68,17 @@ impl Model {
         };
         let model = tract::onnx()?.load(model_path)?.into_model()?;
         let runtime = tract::runtime_for_name(backend_name)?;
+        let runtime_name = runtime.name().unwrap_or_else(|_| backend_name.to_owned());
+        let actual_backend = match runtime_name.as_str() {
+            "cuda" => "cuda",
+            "metal" => "metal",
+            "cpu" => "cpu",
+            _ => backend_name,
+        };
         log::info!(
-            "Nemotron Tract backend: {}",
-            runtime.name().unwrap_or_default()
+            "Nemotron Tract backend: {} ({} available)",
+            backend_name,
+            actual_backend
         );
         let runnable = runtime.prepare(model)?;
 
@@ -96,7 +105,7 @@ impl Model {
         let fft = planner.plan_fft_forward(N_FFT);
         Ok(Self {
             runnable,
-            backend: backend_name,
+            backend: actual_backend,
             silence_embedding,
             mel: slaney_mel(SAMPLE_RATE, N_FFT, N_MELS),
             window: hann_window(),

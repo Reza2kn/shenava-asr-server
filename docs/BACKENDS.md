@@ -7,7 +7,7 @@ HTTP response or tokenization.
 |---|---|---|---|
 | Windows CPU-only | `cpu` | fixed Koochik ONNX | pure Rust tract; no DLL model runtime |
 | Linux CPU | `cpu` | fixed Koochik ONNX | pure Rust tract |
-| NVIDIA Linux | `gpu-or-cpu` | fixed Koochik ONNX | tract CUDA feature and CUDA driver/toolkit |
+| NVIDIA Linux | `cuda` | fixed Koochik ONNX | strict tract CUDA; startup fails rather than silently using CPU |
 | macOS 13+ | `coreml` | fixed Koochik `.mlpackage`/`.mlmodelc` | Rust bindings to the system CoreML framework |
 | Generic Go service | whichever Rust sidecar target fits the host | same as sidecar | dependency-free Go HTTP client |
 
@@ -70,8 +70,18 @@ for an iOS/iPadOS app, but axum server packaging is not an iOS application integ
 
 ```bash
 cargo build --release --locked --features cuda
-./target/release/shenava-asr-server --backend gpu-or-cpu ...
+./target/release/shenava-asr-server --backend cuda ...
 ```
+
+`run.sh` automatically selects strict `cuda` when `nvidia-smi -L` detects an NVIDIA GPU. It also
+checks whether cuDNN is visible to the dynamic loader and discovers the cuDNN-only directory from
+common `nvidia-cudnn-cu13` pip installations. It deliberately does not add an entire Python
+environment to `LD_LIBRARY_PATH`, because that can mix incompatible cuBLAS and cuBLASLt builds.
+
+If CUDA cannot initialize, startup now fails with the actual dependency or driver error. This is
+intentional: a server advertised as GPU-backed must not silently run on CPU. Operators who
+explicitly accept fallback can still invoke `--backend gpu-or-cpu`; explicit CPU deployments use
+`--backend cpu`.
 
 See `deploy/README.md` for the current CUDA/NVRTC host requirements.
 
