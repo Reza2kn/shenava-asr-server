@@ -74,31 +74,3 @@ upload_and_transcribe("rizeh-pizeh")
 #   previous one before loading the next.
 # - Audio is mixed to mono and sherpa resamples it to 16 kHz automatically.
 # - If a download was interrupted, rerun the same model box; Hugging Face resumes its cache.
-
-# %% [markdown]
-# ## 2A. Koochik v1.0 — 114M
-# Best accuracy. Shows both greedy and the 3,669-word hotbeam result.
-
-# %%
-upload_and_transcribe("koochik", include_hotbeam=True)
-
-# %% [markdown]
-# ## 2B. Rizeh v1.0 — 32M
-# Balanced size and accuracy. Shows both greedy and the 3,669-word hotbeam result.
-
-# %%
-upload_and_transcribe("rizeh", include_hotbeam=True)
-
-# %% [markdown]
-# ## 2C. Rizeh-Pizeh v1.0 — 6.9M
-# Tiny and fast. Shows both greedy and the 3,669-word hotbeam result.
-
-# %%
-upload_and_transcribe("rizeh-pizeh", include_hotbeam=True)
-
-# %% [markdown]
-# ## Troubleshooting
-#
-# If Colab has already imported another `sherpa_onnx` or `onnxruntime` build, choose
-# **Runtime → Restart session**, run Setup once, then run one model box. The helper intentionally
-# keeps only one native recognizer alive at a time to avoid memory spikes.
