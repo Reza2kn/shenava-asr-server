@@ -7,6 +7,13 @@ Rust; the acoustic-model runtime can be pure-Rust tract or native Apple CoreML.
 
 No Python, onnxruntime, or C++ is used by the running server.
 
+## Google Colab
+
+Run Koochik, Rizeh, or Rizeh-Pizeh in separate upload-and-transcribe cells. The Koochik box also
+shows Shenava's checksum-locked 3,669-word Persian hotword beam alongside its greedy result.
+
+[![Open Shenava v1 in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Reza2kn/shenava-asr-server/blob/main/notebooks/Shenava_v1_Colab.ipynb)
+
 ## Quick start
 
 ```bash
