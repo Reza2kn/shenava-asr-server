@@ -10,6 +10,7 @@ Set-StrictMode -Version Latest
 $ModelRevision = "b485a2da4b96087df52319c40a81f95329951a81"
 $ModelBase = "https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-tract-offline/resolve/$ModelRevision"
 $ModelPath = Join-Path $PSScriptRoot "models/model.onnx"
+$StreamingPath = Join-Path $PSScriptRoot "models/koochik-streaming.onnx"
 $TokensPath = Join-Path $PSScriptRoot "models/tokens.txt"
 
 function Get-PinnedFile {
@@ -51,9 +52,13 @@ Get-PinnedFile -Url "$ModelBase/tokens.txt" -Path $TokensPath `
     -Sha256 "8E192963F6E666DFA5721E5CBD4710BC1EF592460A45F08CEFC94B2DB16A6954" `
     -Size 12236
 
+Get-PinnedFile -Url "https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-tract-streaming/resolve/main/model.onnx" -Path $StreamingPath `
+    -Sha256 "C5E7DC34F472E89BD3C48DD6D511482BCE455088C5332349AC3AFC36F84A3467" `
+    -Size 458882745
+
 Push-Location $PSScriptRoot
 try {
-    cargo build --release --locked --no-default-features --features cpu-only
+    cargo build --release --locked --no-default-features --features cpu-only,native-streaming
     if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 
     $serverArgs = @(
@@ -61,6 +66,9 @@ try {
         "--tokens", $TokensPath,
         "--mel", (Join-Path $PSScriptRoot "assets/mel_filters.json"),
         "--backend", "cpu",
+        "--streaming-model", $StreamingPath,
+        "--streaming-tokens", $TokensPath,
+        "--streaming-backend", "cpu",
         "--addr", $Addr
     )
     if ($Hotwords) {

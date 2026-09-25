@@ -269,3 +269,97 @@ mod tests {
         assert_eq!(reflect_pad(&[4.0], 3), vec![4.0; 7]);
     }
 }
+
+/// Bounded PCM window. Two retained hops preserve preemphasis and centered STFT
+/// context; future context is held until available, and reflected only at EOF.
+#[cfg(any(feature = "native-streaming", test))]
+#[derive(Default)]
+pub struct LiveFeatures {
+    pcm: Vec<f32>,
+    base: usize,
+    next: usize,
+    total: usize,
+}
+
+#[cfg(any(feature = "native-streaming", test))]
+impl LiveFeatures {
+    pub fn push(&mut self, pcm: &[f32]) {
+        self.pcm.extend_from_slice(pcm);
+        self.total += pcm.len();
+    }
+
+    pub fn next_chunk(
+        &mut self,
+        bank: &Fbank,
+        finish: bool,
+    ) -> Result<Option<(Array3<f32>, usize)>> {
+        const CHUNK: usize = 121;
+        const SHIFT: usize = 112;
+        if self.total == 0 || self.next >= 1 + self.total / HOP {
+            return Ok(None);
+        }
+        if !finish && self.next * HOP + (CHUNK - 1) * HOP + PAD > self.total {
+            return Ok(None);
+        }
+        let (feat, _) = bank.process(&self.pcm, SAMPLE_RATE)?;
+        let offset = self.next - self.base / HOP;
+        let valid = CHUNK.min(1 + self.total / HOP - self.next);
+        let mut chunk = Array3::zeros((1, N_MELS, CHUNK));
+        for m in 0..N_MELS {
+            for t in 0..valid {
+                chunk[[0, m, t]] = feat[[m, offset + t]];
+            }
+        }
+        self.next += SHIFT;
+        let new_base = self.next.saturating_sub(2) * HOP;
+        if new_base > self.base && new_base <= self.total {
+            self.pcm.drain(..new_base - self.base);
+            self.base = new_base;
+        }
+        Ok(Some((chunk, valid)))
+    }
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+
+    #[test]
+    fn packet_boundaries_match_whole_audio_features_and_final_flush() {
+        let bank = Fbank::load(Some(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/mel_filters.json"
+        )))
+        .unwrap();
+        for length in [1, 159, 160, 513, 17920, 19456, 35840, 48017] {
+            let audio: Vec<f32> = (0..length)
+                .map(|i| (i as f32 * 0.071).sin() * 0.3)
+                .collect();
+            let (reference, nf) = bank.process(&audio, 16000).unwrap();
+            for packet_size in [319, 3200] {
+                let mut live = LiveFeatures::default();
+                let mut chunks = Vec::new();
+                for packet in audio.chunks(packet_size) {
+                    live.push(packet);
+                    while let Some(chunk) = live.next_chunk(&bank, false).unwrap() {
+                        chunks.push(chunk);
+                    }
+                    assert!(live.pcm.len() < 23000, "PCM storage must remain bounded");
+                }
+                while let Some(chunk) = live.next_chunk(&bank, true).unwrap() {
+                    chunks.push(chunk);
+                }
+                assert_eq!(chunks.len(), nf.div_ceil(112));
+                for (index, (chunk, valid)) in chunks.iter().enumerate() {
+                    assert_eq!(*valid, (nf - index * 112).min(121));
+                    for m in 0..80 {
+                        for t in 0..*valid {
+                            assert!((chunk[[0,m,t]] - reference[[m,index*112+t]]).abs() < 1e-5,
+                                "feature mismatch length={length}, packet={packet_size}, chunk={index}, mel={m}, frame={t}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

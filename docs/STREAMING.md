@@ -6,7 +6,12 @@ Its FP32 `model.onnx` is the reference graph for this route; the repository's
 INT4 graph currently advertises a 121-frame contract but contains a 25-frame
 input, so it remains excluded until that package is corrected.
 
-The server supports a second ASR mode through `POST /transcribe`:
+For live microphone capture and partial transcripts, open the built-in page at
+`http://localhost:3000`. See [the microphone guide](MICROPHONE.md) for the `/stream`
+WebSocket protocol.
+
+The server also supports a second ASR mode through `POST /transcribe`. This file
+route consumes a completed WAV and returns a single response:
 
 ```bash
 cargo build --release --features cuda,native-streaming

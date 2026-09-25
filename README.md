@@ -31,6 +31,17 @@ The first launch downloads the offline, streaming, and public Nemotron model ass
 `HF_TOKEN` is optional. See
 [the backend matrix](docs/BACKENDS.md) for build commands and deployment boundaries.
 
+## Microphone input and live transcription
+
+Start the server with the launcher for your platform, open **http://localhost:3000**,
+choose your microphone, and click **Start microphone**. Text appears as you speak;
+**Stop** releases the microphone and completes the transcript. Remote browser access
+requires HTTPS or an SSH tunnel to localhost.
+
+The built-in page sends small PCM packets through `/stream`, retaining model state
+between packets. No WAV file or separate client installation is needed. Live mode
+uses greedy decoding. See [microphone setup, efficiency, and WebSocket protocol](docs/MICROPHONE.md).
+
 ## Native Rust diarization and streaming
 
 The optional native pipelines are implemented in Rust with Tract and selected per request:

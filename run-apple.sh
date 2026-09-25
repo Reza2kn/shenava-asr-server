@@ -35,11 +35,18 @@ download_verified "$COREML_BASE/shenava-koochik-v1.0_ctc_fixed2005_len_fp16.mlpa
 download_verified "$TOKEN_URL" "$ROOT/models/tokens.txt" \
   "8e192963f6e666dfa5721e5cbd4710bc1ef592460a45f08cefc94b2db16a6954"
 
+STREAMING_MODEL="$ROOT/models/koochik-streaming.onnx"
+download_verified "https://huggingface.co/Reza2kn/Shenava-Koochik-v1.0-tract-streaming/resolve/main/model.onnx" \
+  "$STREAMING_MODEL" "c5e7dc34f472e89bd3c48dd6d511482bce455088c5332349ac3afc36f84a3467"
+
 cd "$ROOT"
-cargo build --release --locked --no-default-features --features coreml
+cargo build --release --locked --no-default-features --features coreml,native-streaming
 exec ./target/release/shenava-asr-server \
   --model "$PACKAGE" \
   --tokens "$ROOT/models/tokens.txt" \
   --mel "$ROOT/assets/mel_filters.json" \
   --backend coreml \
+  --streaming-model "$STREAMING_MODEL" \
+  --streaming-tokens "$ROOT/models/tokens.txt" \
+  --streaming-backend cpu \
   "$@"

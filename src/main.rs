@@ -9,6 +9,7 @@
 
 mod decode;
 mod fbank;
+mod live;
 mod model;
 #[cfg(feature = "native-diarization")]
 mod nemotron;
@@ -316,6 +317,11 @@ async fn main() -> Result<()> {
     });
 
     let router = Router::new()
+        .route("/", get(live::page))
+        .route("/mic-worklet.js", get(live::worklet))
+        .route("/mic.js", get(live::script))
+        .route("/mic-config", get(live::config))
+        .route("/stream", get(live::upgrade))
         .route("/health", get(health))
         .route("/transcribe", post(transcribe))
         .route("/diarize", post(diarize))

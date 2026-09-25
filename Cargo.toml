@@ -31,10 +31,10 @@ coreml = ["dep:coreml-native"]
 # not pull the full runtime registry unless diarization is requested.
 native-diarization = ["tract-runtime"]
 # Native Rust cache-aware Persian Koochik CTC streaming through Tract.
-native-streaming = ["tract-runtime"]
+native-streaming = ["cpu-only"]
 
 [dependencies]
-axum = { version = "0.8", features = ["multipart"] }
+axum = { version = "0.8", features = ["multipart", "ws"] }
 tokio = { version = "1", features = ["full"] }
 tower = "0.5"
 serde = { version = "1", features = ["derive"] }

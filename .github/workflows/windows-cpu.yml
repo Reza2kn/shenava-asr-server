@@ -37,7 +37,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: models
-          key: windows-koochik-b485a2da4b96087df52319c40a81f95329951a81
+          key: windows-koochik-b485a2da4b96087df52319c40a81f95329951a81-streaming-c5e7dc34
 
       - name: Parse the PowerShell launcher
         shell: pwsh
@@ -57,17 +57,17 @@ jobs:
       - name: Verify the CPU-only graph excludes CUDA
         shell: pwsh
         run: |
-          $tree = cargo tree --locked --no-default-features --features cpu-only
+          $tree = cargo tree --locked --no-default-features --features cpu-only,native-streaming
           if ($LASTEXITCODE -ne 0) { throw "cargo tree failed" }
           if ($tree | Select-String -SimpleMatch "cudarc") {
             throw "The Windows CPU-only dependency graph unexpectedly contains cudarc"
           }
 
       - name: Run CPU-only tests with MSVC
-        run: cargo test --locked --no-default-features --features cpu-only
+        run: cargo test --locked --no-default-features --features cpu-only,native-streaming
 
       - name: Build the native release executable
-        run: cargo build --release --locked --no-default-features --features cpu-only
+        run: cargo build --release --locked --no-default-features --features cpu-only,native-streaming
 
       - name: Launch the native executable
         shell: pwsh
@@ -109,6 +109,15 @@ jobs:
               throw "Unexpected health response: $($health | ConvertTo-Json -Compress)"
             }
             Write-Host "Verified Windows health: $($health | ConvertTo-Json -Compress)"
+            $microphone = Invoke-RestMethod -Uri "http://127.0.0.1:3100/mic-config" -TimeoutSec 5
+            if (-not $microphone.available) {
+              throw "The Windows launcher did not enable microphone streaming"
+            }
+            $page = Invoke-WebRequest -Uri "http://127.0.0.1:3100/" -TimeoutSec 5
+            if ($page.Content -notmatch "Start microphone") {
+              throw "The embedded microphone page was not served"
+            }
+            Write-Host "Verified Windows microphone configuration and embedded page"
           } finally {
             if (-not $server.HasExited) {
               taskkill /PID $server.Id /T /F | Out-Null

@@ -73,40 +73,54 @@ pub fn load_labels(tokens_path: &str) -> Result<(Vec<String>, usize)> {
 
 /// Greedy argmax decode (no hotwords) — useful as a fast baseline.
 pub fn greedy(log_probs: &Array2<f32>, labels: &[String], blank_id: usize) -> String {
-    let mut out = String::new();
-    let mut prev: Option<usize> = None;
-    for t in 0..log_probs.shape()[0] {
-        let mut best = 0usize;
-        let mut best_v = f32::NEG_INFINITY;
-        for v in 0..log_probs.shape()[1] {
-            let x = log_probs[[t, v]];
-            if x > best_v {
-                best_v = x;
-                best = v;
+    let mut decoder = GreedyStream::default();
+    decoder.push(log_probs, labels, blank_id);
+    decoder.text()
+}
+
+/// CTC repetition state survives packet and encoder-chunk boundaries.
+#[derive(Default)]
+pub struct GreedyStream {
+    raw: String,
+    prev: Option<usize>,
+}
+
+impl GreedyStream {
+    pub fn push(&mut self, log_probs: &Array2<f32>, labels: &[String], blank_id: usize) {
+        for row in log_probs.rows() {
+            let mut best = 0;
+            let mut value = f32::NEG_INFINITY;
+            for (v, &score) in row.iter().enumerate() {
+                if score > value {
+                    best = v;
+                    value = score;
+                }
             }
+            if best == blank_id {
+                self.prev = None;
+                continue;
+            }
+            if self.prev == Some(best) {
+                continue;
+            }
+            let label = &labels[best];
+            if label.is_empty() {
+                continue;
+            }
+            if label.starts_with(BPE) && !self.raw.is_empty() {
+                self.raw.push(' ');
+            }
+            self.raw.push_str(label.trim_matches(BPE));
+            self.prev = Some(best);
         }
-        if best == blank_id {
-            prev = None;
-            continue;
-        }
-        if prev == Some(best) {
-            continue;
-        }
-        let s = &labels[best];
-        if s.is_empty() {
-            continue;
-        }
-        let starts_word = s.starts_with(BPE);
-        let s = s.trim_matches(BPE);
-        if starts_word && !out.is_empty() {
-            out.push(' ');
-        }
-        out.push_str(s);
-        prev = Some(best);
     }
-    out.chars()
-        .filter(|c| !('\u{E000}'..='\u{E0FF}').contains(c))
-        .collect()
+
+    pub fn text(&self) -> String {
+        self.raw
+            .chars()
+            .filter(|c| !('\u{E000}'..='\u{E0FF}').contains(c))
+            .collect()
+    }
 }
 
 /// Run hotword-boosted beam decode over `log_probs` (T x V).
@@ -220,5 +234,33 @@ mod tests {
         assert!(labels[0].chars().next().unwrap() as u32 >= 0xE000);
         assert_eq!(labels[1], "");
         assert_eq!(labels[2], "▁سلام");
+    }
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+    #[test]
+    fn repeated_tokens_and_blanks_survive_chunk_boundaries() {
+        let labels = vec!["▁سلام".into(), "ت".into(), "".into()];
+        let ids = [0, 0, 0, 2, 0, 1, 1, 2, 1];
+        let mut logits = Array2::from_elem((ids.len(), 3), -10.0);
+        for (i, token) in ids.iter().enumerate() {
+            logits[[i, *token]] = 0.0;
+        }
+        for split in 1..ids.len() {
+            let mut stream = GreedyStream::default();
+            stream.push(
+                &logits.slice(ndarray::s![..split, ..]).to_owned(),
+                &labels,
+                2,
+            );
+            stream.push(
+                &logits.slice(ndarray::s![split.., ..]).to_owned(),
+                &labels,
+                2,
+            );
+            assert_eq!(stream.text(), greedy(&logits, &labels, 2));
+        }
     }
 }
