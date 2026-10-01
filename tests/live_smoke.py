@@ -11,6 +11,11 @@ import wave
 import requests
 import websockets
 
+def handshake_status(error):
+    """Read HTTP rejection codes from legacy and current websockets clients."""
+    response = getattr(error, "response", None)
+    return response.status_code if response is not None else getattr(error, "status_code", None)
+
 async def run(url, audio):
     with wave.open(audio, 'rb') as wav:
         assert (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) == (1, 2, 16000)
@@ -45,8 +50,8 @@ async def run(url, audio):
         try:
             async with websockets.connect(ws_url):
                 raise AssertionError('Unbounded third session accepted')
-        except websockets.exceptions.InvalidStatus as error:
-            assert error.response.status_code == 503
+        except websockets.exceptions.InvalidHandshake as error:
+            assert handshake_status(error) == 503, error
         await first.send(pcm[:6400])
         assert json.loads(await first.recv())['type'] == 'ack'
         await second.send('{"type":"finish"}')
@@ -67,8 +72,8 @@ async def run(url, audio):
     try:
         async with websockets.connect(ws_url, origin='https://unrelated.example'):
             raise AssertionError('Cross-origin request was accepted')
-    except websockets.exceptions.InvalidStatus as error:
-        assert error.response.status_code == 403
+    except websockets.exceptions.InvalidHandshake as error:
+        assert handshake_status(error) == 403, error
     print(json.dumps({'reference': reference, 'audio_s': len(pcm) / 32000, 'runs': results, 'malformed_packets': 'passed', 'empty_finish': 'passed', 'origin_check': 'passed', 'session_isolation_and_limit': 'passed'}, ensure_ascii=False, indent=2))
 
 if __name__ == '__main__':
